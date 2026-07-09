@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Navbar } from './components/Navbar';
 import { BackgroundGlows } from './components/BackgroundGlows';
 import { StockSelector } from './components/StockSelector';
@@ -30,9 +30,16 @@ export const App: React.FC = () => {
   const [agentsDecisions, setAgentsDecisions] = useState<AgentDecision[]>([]);
   const [backtestData, setBacktestData] = useState<BacktestDataPoint[]>([]);
 
+  const scanIntervalRef = useRef<any>(null);
+
   // Load default stock (NVDA) on mount with simulated scan
   useEffect(() => {
     handleScan('NVDA');
+    return () => {
+      if (scanIntervalRef.current) {
+        clearInterval(scanIntervalRef.current);
+      }
+    };
   }, []);
 
   const handleScan = (targetTicker: string) => {
@@ -42,13 +49,29 @@ export const App: React.FC = () => {
     setScannedAgents([]);
     setActiveAgentIdx(0);
 
+    // Clear any running scan intervals to prevent race conditions or crashes
+    if (scanIntervalRef.current) {
+      clearInterval(scanIntervalRef.current);
+      scanIntervalRef.current = null;
+    }
+
     // Fetch the data from generator beforehand so we can simulate the agents scanning it
     const { details, agents, backtest } = getStockData(symbol);
 
     // Dynamic scanning animation pipeline
     // We scan each of the 5 agents one by one
     let currentIdx = 0;
-    const interval = setInterval(() => {
+    scanIntervalRef.current = setInterval(() => {
+      // Protect bounds access to prevent crashes
+      if (currentIdx >= agents.length) {
+        if (scanIntervalRef.current) {
+          clearInterval(scanIntervalRef.current);
+          scanIntervalRef.current = null;
+        }
+        setIsLoading(false);
+        return;
+      }
+
       setScannedAgents(prev => [...prev, agents[currentIdx].id]);
       currentIdx++;
       
@@ -56,7 +79,10 @@ export const App: React.FC = () => {
         setActiveAgentIdx(currentIdx);
       } else {
         // All agents scanned!
-        clearInterval(interval);
+        if (scanIntervalRef.current) {
+          clearInterval(scanIntervalRef.current);
+          scanIntervalRef.current = null;
+        }
         setActiveAgentIdx(-1);
         setIsLoading(false);
         // Commit values to state
